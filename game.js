@@ -1,6 +1,6 @@
 /**
  * Winged Red 7s — Batch 2
- * Compact phone controls, paytable modal, procedural cabinet sounds.
+ * Compact phone controls, paytable modal, mechanical bar-cabinet SFX.
  * Batch 1 spin/bet/save behavior preserved.
  */
 (function () {
@@ -61,10 +61,11 @@
     lineMarkers: Array.from(document.querySelectorAll(".lm")),
   };
 
-  /* —— Web Audio: fake-digital cabinet sounds (no samples) —— */
+  /* —— Web Audio: old mechanical bar-7s cabinet (procedural, no samples) —— */
   const audio = {
     ctx: null,
     unlocked: false,
+    spin: null,
   };
 
   function ensureAudio() {
@@ -80,30 +81,52 @@
     return audio.ctx;
   }
 
-  function beep(freq, dur, type, gain, when) {
-    if (state.muted) return;
-    const ctx = ensureAudio();
-    if (!ctx) return;
-    const t0 = (when != null ? when : 0) + ctx.currentTime;
-    const osc = ctx.createOscillator();
-    const g = ctx.createGain();
-    osc.type = type || "square";
-    osc.frequency.setValueAtTime(freq, t0);
-    g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(gain || 0.08, t0 + 0.01);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    osc.connect(g);
-    g.connect(ctx.destination);
-    osc.start(t0);
-    osc.stop(t0 + dur + 0.02);
+  function makeNoiseBuffer(ctx, seconds) {
+    const len = Math.max(1, Math.floor(ctx.sampleRate * seconds));
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    let b0 = 0;
+    for (let i = 0; i < len; i++) {
+      const white = Math.random() * 2 - 1;
+      b0 = 0.97 * b0 + 0.03 * white;
+      data[i] = white * 0.35 + b0 * 0.65;
+    }
+    return buf;
   }
 
-  function noiseBurst(dur, gain, when) {
-    if (state.muted) return;
-    const ctx = ensureAudio();
+  function stopSpinLoop(fadeMs) {
+    const nodes = audio.spin;
+    if (!nodes) return;
+    audio.spin = null;
+    const ctx = audio.ctx;
     if (!ctx) return;
-    const t0 = (when != null ? when : 0) + ctx.currentTime;
-    const len = Math.max(1, Math.floor(ctx.sampleRate * dur));
+    const t = ctx.currentTime;
+    const fade = Math.max(0.03, (fadeMs || 90) / 1000);
+    try {
+      if (nodes.tickTimer) {
+        clearInterval(nodes.tickTimer);
+        nodes.tickTimer = null;
+      }
+      if (nodes.master) {
+        const cur = Math.max(nodes.master.gain.value, 0.0001);
+        nodes.master.gain.cancelScheduledValues(t);
+        nodes.master.gain.setValueAtTime(cur, t);
+        nodes.master.gain.exponentialRampToValueAtTime(0.0001, t + fade);
+      }
+      const stopAt = t + fade + 0.06;
+      (nodes.sources || []).forEach(function (s) {
+        try {
+          s.stop(stopAt);
+        } catch (_) {}
+      });
+    } catch (_) {}
+  }
+
+  function softRatchetTick() {
+    if (state.muted || !audio.spin || !audio.ctx) return;
+    const ctx = audio.ctx;
+    const t0 = ctx.currentTime;
+    const len = Math.max(1, Math.floor(ctx.sampleRate * 0.016));
     const buf = ctx.createBuffer(1, len, ctx.sampleRate);
     const data = buf.getChannelData(0);
     for (let i = 0; i < len; i++) {
@@ -111,53 +134,257 @@
     }
     const src = ctx.createBufferSource();
     src.buffer = buf;
-    const g = ctx.createGain();
     const filt = ctx.createBiquadFilter();
     filt.type = "bandpass";
-    filt.frequency.value = 1800;
-    filt.Q.value = 0.8;
-    g.gain.setValueAtTime(gain || 0.12, t0);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    filt.frequency.value = 1600 + Math.random() * 400;
+    filt.Q.value = 1.4;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.028, t0 + 0.0015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.015);
     src.connect(filt);
     filt.connect(g);
-    g.connect(ctx.destination);
+    g.connect(audio.spin.master);
     src.start(t0);
-    src.stop(t0 + dur + 0.02);
+    src.stop(t0 + 0.02);
   }
 
   function sfxSpinStart() {
-    // light digital whir + click
-    beep(220, 0.06, "square", 0.05);
-    beep(330, 0.08, "square", 0.04, 0.04);
-    noiseBurst(0.05, 0.06, 0.02);
+    if (state.muted) return;
+    const ctx = ensureAudio();
+    if (!ctx) return;
+    stopSpinLoop(20);
+
+    const t0 = ctx.currentTime;
+    const master = ctx.createGain();
+    master.gain.setValueAtTime(0.0001, t0);
+    master.gain.exponentialRampToValueAtTime(1, t0 + 0.06);
+    master.connect(ctx.destination);
+
+    // Continuous filtered noise — reel whir bed
+    const noiseSrc = ctx.createBufferSource();
+    noiseSrc.buffer = makeNoiseBuffer(ctx, 1.6);
+    noiseSrc.loop = true;
+    const noiseFilt = ctx.createBiquadFilter();
+    noiseFilt.type = "bandpass";
+    noiseFilt.frequency.setValueAtTime(620, t0);
+    noiseFilt.frequency.linearRampToValueAtTime(980, t0 + 2.4);
+    noiseFilt.Q.value = 0.85;
+    const noiseG = ctx.createGain();
+    noiseG.gain.value = 0.05;
+    noiseSrc.connect(noiseFilt);
+    noiseFilt.connect(noiseG);
+    noiseG.connect(master);
+    noiseSrc.start(t0);
+
+    // Low-mid motor whir (mechanical, not a beep loop)
+    const whir = ctx.createOscillator();
+    whir.type = "sawtooth";
+    whir.frequency.setValueAtTime(88, t0);
+    whir.frequency.linearRampToValueAtTime(112, t0 + 2.0);
+    const whirFilt = ctx.createBiquadFilter();
+    whirFilt.type = "lowpass";
+    whirFilt.frequency.value = 360;
+    whirFilt.Q.value = 0.6;
+    const whirG = ctx.createGain();
+    whirG.gain.value = 0.03;
+    whir.connect(whirFilt);
+    whirFilt.connect(whirG);
+    whirG.connect(master);
+    whir.start(t0);
+
+    // Soft sub rumble under the whir
+    const sub = ctx.createOscillator();
+    sub.type = "sine";
+    sub.frequency.setValueAtTime(52, t0);
+    const subG = ctx.createGain();
+    subG.gain.value = 0.022;
+    sub.connect(subG);
+    subG.connect(master);
+    sub.start(t0);
+
+    const tickTimer = setInterval(function () {
+      softRatchetTick();
+    }, 90 + Math.floor(Math.random() * 25));
+
+    audio.spin = {
+      master: master,
+      sources: [noiseSrc, whir, sub],
+      tickTimer: tickTimer,
+    };
   }
 
   function sfxReelStop() {
-    // mechanical clunk
-    noiseBurst(0.045, 0.14);
-    beep(90, 0.07, "triangle", 0.1);
-    beep(55, 0.09, "sine", 0.06, 0.02);
+    if (state.muted) return;
+    const ctx = ensureAudio();
+    if (!ctx) return;
+    const t0 = ctx.currentTime;
+
+    // Weighty mid-frequency mechanical clunk body (noise)
+    const len = Math.max(1, Math.floor(ctx.sampleRate * 0.1));
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 1.55);
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const filt = ctx.createBiquadFilter();
+    filt.type = "lowpass";
+    filt.frequency.setValueAtTime(1500, t0);
+    filt.frequency.exponentialRampToValueAtTime(380, t0 + 0.08);
+    filt.Q.value = 1.3;
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.0001, t0);
+    ng.gain.exponentialRampToValueAtTime(0.24, t0 + 0.003);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.095);
+    src.connect(filt);
+    filt.connect(ng);
+    ng.connect(ctx.destination);
+    src.start(t0);
+    src.stop(t0 + 0.11);
+
+    // Pitch-drop thunk — weighty, not a toy click
+    const osc = ctx.createOscillator();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(185, t0);
+    osc.frequency.exponentialRampToValueAtTime(52, t0 + 0.085);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.0001, t0);
+    og.gain.exponentialRampToValueAtTime(0.17, t0 + 0.003);
+    og.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.11);
+    osc.connect(og);
+    og.connect(ctx.destination);
+    osc.start(t0);
+    osc.stop(t0 + 0.13);
+
+    const osc2 = ctx.createOscillator();
+    osc2.type = "sine";
+    osc2.frequency.setValueAtTime(105, t0);
+    osc2.frequency.exponentialRampToValueAtTime(45, t0 + 0.1);
+    const og2 = ctx.createGain();
+    og2.gain.setValueAtTime(0.0001, t0);
+    og2.gain.exponentialRampToValueAtTime(0.11, t0 + 0.004);
+    og2.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.12);
+    osc2.connect(og2);
+    og2.connect(ctx.destination);
+    osc2.start(t0);
+    osc2.stop(t0 + 0.14);
+  }
+
+  function coinClink(absTime, peak) {
+    const ctx = audio.ctx;
+    if (!ctx) return;
+    const len = Math.max(1, Math.floor(ctx.sampleRate * 0.065));
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.1);
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const filt = ctx.createBiquadFilter();
+    filt.type = "bandpass";
+    filt.frequency.value = 2000 + Math.random() * 2200;
+    filt.Q.value = 2.8;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, absTime);
+    g.gain.exponentialRampToValueAtTime(peak, absTime + 0.002);
+    g.gain.exponentialRampToValueAtTime(0.0001, absTime + 0.058);
+    src.connect(filt);
+    filt.connect(g);
+    g.connect(ctx.destination);
+    src.start(absTime);
+    src.stop(absTime + 0.07);
+
+    const o = ctx.createOscillator();
+    o.type = "triangle";
+    const f = 1600 + Math.random() * 1600;
+    o.frequency.setValueAtTime(f, absTime);
+    o.frequency.exponentialRampToValueAtTime(f * 0.55, absTime + 0.05);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.0001, absTime);
+    og.gain.exponentialRampToValueAtTime(peak * 0.4, absTime + 0.002);
+    og.gain.exponentialRampToValueAtTime(0.0001, absTime + 0.048);
+    o.connect(og);
+    og.connect(ctx.destination);
+    o.start(absTime);
+    o.stop(absTime + 0.055);
   }
 
   function sfxWin(amount) {
-    // rising chiptune cascade + coin tumble
-    const steps = amount >= 5 ? 6 : amount >= 1 ? 4 : 3;
-    for (let i = 0; i < steps; i++) {
-      beep(440 + i * 110, 0.09, "square", 0.07, i * 0.07);
+    if (state.muted) return;
+    const ctx = ensureAudio();
+    if (!ctx) return;
+    const t0 = ctx.currentTime;
+
+    // Short knocker / bell, then change into tray
+    function knocker(freq, when, peak) {
+      const o = ctx.createOscillator();
+      o.type = "sine";
+      o.frequency.setValueAtTime(freq, t0 + when);
+      o.frequency.exponentialRampToValueAtTime(freq * 0.82, t0 + when + 0.14);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t0 + when);
+      g.gain.exponentialRampToValueAtTime(peak, t0 + when + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + when + 0.2);
+      o.connect(g);
+      g.connect(ctx.destination);
+      o.start(t0 + when);
+      o.stop(t0 + when + 0.22);
     }
-    for (let i = 0; i < 5; i++) {
-      noiseBurst(0.035, 0.08, 0.12 + i * 0.055);
-      beep(900 + (i % 3) * 200, 0.04, "square", 0.045, 0.12 + i * 0.055);
+    knocker(920, 0, 0.13);
+    knocker(1240, 0.045, 0.075);
+
+    const bursts = amount >= 5 ? 11 : amount >= 1 ? 8 : 5;
+    let delay = 0.15;
+    for (let i = 0; i < bursts; i++) {
+      delay += 0.03 + Math.random() * 0.075;
+      coinClink(t0 + delay, 0.055 + Math.random() * 0.055);
     }
   }
 
   function sfxNoWin() {
-    beep(160, 0.08, "triangle", 0.04);
-    beep(110, 0.1, "triangle", 0.03, 0.06);
+    if (state.muted) return;
+    const ctx = ensureAudio();
+    if (!ctx) return;
+    const t0 = ctx.currentTime;
+    // Soft dull settle — mechanical, not a modern UI down-chirp
+    const osc = ctx.createOscillator();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(98, t0);
+    osc.frequency.exponentialRampToValueAtTime(58, t0 + 0.12);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.048, t0 + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.14);
+    osc.connect(g);
+    g.connect(ctx.destination);
+    osc.start(t0);
+    osc.stop(t0 + 0.16);
   }
 
   function sfxClick() {
-    beep(520, 0.03, "square", 0.035);
+    if (state.muted) return;
+    const ctx = ensureAudio();
+    if (!ctx) return;
+    const t0 = ctx.currentTime;
+    // Tiny old electronic beep for denom/lines — not a modern chirp
+    const osc = ctx.createOscillator();
+    osc.type = "square";
+    osc.frequency.setValueAtTime(420, t0);
+    const filt = ctx.createBiquadFilter();
+    filt.type = "lowpass";
+    filt.frequency.value = 1800;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.038, t0 + 0.002);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.032);
+    osc.connect(filt);
+    filt.connect(g);
+    g.connect(ctx.destination);
+    osc.start(t0);
+    osc.stop(t0 + 0.04);
   }
 
   function money(n) {
@@ -351,6 +578,7 @@
   function toggleMute() {
     ensureAudio();
     state.muted = !state.muted;
+    if (state.muted) stopSpinLoop(50);
     save();
     updateMuteUI();
     if (!state.muted) sfxClick();
@@ -433,6 +661,8 @@
     ]);
 
     if (token !== state.spinToken) return;
+
+    stopSpinLoop(110);
 
     const result = evaluate(grid, state.lines);
     state.lastGrid = grid;
