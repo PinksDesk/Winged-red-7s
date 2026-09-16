@@ -1,0 +1,98 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#1a0508" />
+  <title>Winged Red 7s</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app" id="app">
+    <header class="header">
+      <h1 class="title">Winged Red 7s</h1>
+      <p class="tagline">Fake money · single player · local only</p>
+    </header>
+
+    <section class="bankroll-bar" aria-live="polite">
+      <div class="stat">
+        <span class="stat-label">Bankroll</span>
+        <span class="stat-value" id="bankroll">$100.00</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Bet</span>
+        <span class="stat-value" id="totalBet">$0.25</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Last Win</span>
+        <span class="stat-value" id="lastWin">$0.00</span>
+      </div>
+    </section>
+
+    <section class="machine" aria-label="Slot machine">
+      <div class="reel-frame">
+        <div class="line-markers" aria-hidden="true">
+          <span class="lm lm-2">2</span>
+          <span class="lm lm-1">1</span>
+          <span class="lm lm-3">3</span>
+        </div>
+        <div class="reels" id="reels">
+          <div class="reel" data-reel="0" tabindex="-1">
+            <div class="reel-strip" id="strip0"></div>
+          </div>
+          <div class="reel" data-reel="1" tabindex="-1">
+            <div class="reel-strip" id="strip1"></div>
+          </div>
+          <div class="reel" data-reel="2" tabindex="-1">
+            <div class="reel-strip" id="strip2"></div>
+          </div>
+        </div>
+        <div class="paylines-overlay" id="paylinesOverlay" aria-hidden="true"></div>
+      </div>
+      <p class="status" id="status" role="status">Ready — press Spin</p>
+    </section>
+
+    <section class="controls" aria-label="Game controls">
+      <div class="control-group">
+        <span class="control-label" id="denomLabel">Denom</span>
+        <div class="btn-row" role="group" aria-labelledby="denomLabel">
+          <button type="button" class="btn btn-choice" id="denomBtn" data-action="denom" aria-describedby="denomHint">$0.25</button>
+        </div>
+        <span class="hint" id="denomHint">Cycles $0.25 → $0.50 → $1 (idle only)</span>
+      </div>
+
+      <div class="control-group">
+        <span class="control-label" id="linesLabel">Lines</span>
+        <div class="btn-row" role="group" aria-labelledby="linesLabel">
+          <button type="button" class="btn btn-choice" id="linesBtn" data-action="lines" aria-describedby="linesHint">1 Line</button>
+        </div>
+        <span class="hint" id="linesHint">1–3 lines · 1 credit each (idle only)</span>
+      </div>
+
+      <button type="button" class="btn btn-spin" id="spinBtn" data-action="spin">SPIN</button>
+    </section>
+
+    <section class="paytable" aria-labelledby="paytableHeading">
+      <h2 id="paytableHeading">Paytable</h2>
+      <p class="pay-note">Pays on active lines (middle=1, top=2, bottom=3). Win = multiplier × denom per line.</p>
+      <table>
+        <thead>
+          <tr><th>Combination</th><th>Multiplier</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>3 × Red-White-Blue 7</td><td>×40</td></tr>
+          <tr><td>3 × Red 7</td><td>×20</td></tr>
+          <tr><td>3 × White 7</td><td>×12</td></tr>
+          <tr><td>3 × Blue 7</td><td>×8</td></tr>
+          <tr><td>Any 3 mixed 7s</td><td>×3</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <footer class="footer">
+      <p>No real money. Progress saved in this browser only (localStorage).</p>
+    </footer>
+  </div>
+  <script src="game.js"></script>
+</body>
+</html>
